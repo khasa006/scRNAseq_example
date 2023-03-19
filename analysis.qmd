@@ -1,6 +1,6 @@
 ---
-title: "your_title_goes_here"
-author: "your_name_goes_here"
+title: "Example Single Cell RNA-seq Analysis"
+author: "Kazi Tanvir Hasan"
 date: "`r Sys.Date()`"
 format:
   html:
@@ -8,7 +8,7 @@ format:
 knitr:
   opts_chunk:      ########## set global options ############
     collapse: true # keep code from blocks together (if shown)
-    echo: false    # don't show code
+    echo: true    # show code
     message: true  # show messages
     warning: true  # show warnings
     error: true    # show error messages
@@ -38,22 +38,8 @@ options(dplyr.summarise.inform=F)
 ```
 
 
-Original Guide: https://satijalab.org/seurat/articles/objectSeurat3k_tutorial.html
 
-
-# Chapters  
-1. Package Import 
-2. Data Import  
-3. Data QC and Inspection  
-5. Data Normalization  
-6. Data Clustering (PCA/UMAP)  
-7. Markers Identification  
-8. Putting all together  
-
-
-
-# Download the rawdata here
-https://s3-us-west-2.amazonaws.com/10x.files/samples/cell/objectSeurat3k/objectSeurat3k_filtered_gene_bc_matrices
+# Import Seurat Object 
 
 ```{r}
 # Load the Seurat dbject dataset
@@ -63,12 +49,29 @@ objectSeurat <- readRDS(
 ```
 
 
+
+# Data QC and Inspection
+
+After creating the Seurat object, the next step is to do quality control on the data. The most common quality control is to filter out
+
+1.  Cells with too few genes detected. They usually represent cells which are not sequenced deep enough for reliable characterization.
+
+2.  Cells with too many genes detected. They may represent doublets or multiplets (i.e. two or more cells in the same droplet, therefore sharing the same cell barcode).
+
+3.  Cells with high mitochondrial transcript percentage. As most of the scRNA-seq experiments use oligo-T to capture mRNAs, mitochondrial transcripts should be relatively under-representative due to their lack of poly-A tails, but it is unavoidable that some mitochondrial transcripts are captured. Meanwhile, there is also some evidence that stable poly-A tails exist in some mitochondrial transcripts but serve as a marker for degradation (e.g. this [paper](https://mcb.asm.org/content/25/15/6427.long)). Together, cells with high mitochondrial transcript percentage likely represent cells under stress (e.g. hypoxia) which produce a lot of mitochondria, or which produce an abnormally high amount of truncated mitochondrial transcripts.
+
+While numbers of detected genes are summarized by Seurat automatically when creating the Seurat object (with nFeature_RNA being the number of detected genes/features; nCount_RNA being the number of detected transcripts), one needs to calculate mitochondial transcript percentages manually. Still, Seurat provides an easy solution
+
 ```{r}
 # The [[ operator can add columns to object metadata. This is a great place to stash QC stats
 objectSeurat[["percent.mt"]] <- PercentageFeatureSet(
   objectSeurat, pattern = "^MT-"
 )
+```
 
+Please note that there is no one-size-fits-all filtering criteria, as the normal ranges of these metrics can vary dramatically from one experiment to another, depending on sample origin as well as reagents and sequencing depths. One suggestion here is to ONLY FILTER OUT OUTLIER CELLS, i.e. the minority of cells with certain QC metrics clearly above or below the majority of cells. To do that, one needs to first know how these values are distributed in the data. One can look at the distribution by creating a violin plot for each of the metrics.
+
+```{r}
 # Visualize QC metrics as a violin plot
 VlnPlot(
   objectSeurat, 
@@ -77,6 +80,18 @@ VlnPlot(
 )
 ```
 
+Or if you don't like the dots (individual cells)
+
+```{r}
+VlnPlot(
+  objectSeurat, 
+  features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+  ncol = 3, 
+  pt.size = 0
+)
+```
+
+And as one would expect, number of detected genes and number of detected transcripts are well correlated across cells while mitochondrial transcript percentage is not.
 
 ```{r}
 # FeatureScatter is typically used to visualize feature-feature relationships, but can be used
@@ -96,14 +111,44 @@ plot2 <- FeatureScatter(
 
 plot1 + plot2
 ```
-VST function calculates a variance stabilizing transformation (VST) from the fitted dispersion-mean relation(s) and then transforms the count data (normalized by division by the size factors or normalization factors), yielding a matrix of values which are now approximately homoskedastic (having constant variance along the range of mean values). The transformation also normalizes with respect to library size. The rlog is less sensitive to size factors, which can be an issue when size factors vary widely. These transformations are useful when checking for outliers or as input for machine learning techniques such as clustering or linear discriminant analysis.
+
+P.S. patchwork is an R package developed to facilitate layout of plots produced by ggplot2 (Seurat uses ggplot2 to produce plots if you use the plotting functions in the Seurat package). Without patchwork, it is illegal to run `plot1 + plot2`.
+
+Due to the correlation of gene number and transcript number, we only need to set a cutoff to either one of these metrics, combined with an upper threshold of mitochondrial transcript percentage, for the QC. For instance, for this data set, a detected gene number between 500 and 5000, and a mitochondrial transcript percentage lower than 5% would be quite reasonable, but it is fine to use different thresholds.
+
+```{r}
+objectSeurat <- subset(
+  objectSeurat, 
+  subset = nFeature_RNA > 500 & nFeature_RNA < 5000 & percent.mt < 5
+)
+```
+
+It is worth to mention that sometimes more QC may need to be applied. One potential issue is the presence of doublets. As the amount of captured RNA varies a lot from cell to cell, doublets don't always show a higher number of detected genes or transcripts. There are several tools available now, which are designed to predict whether a 'cell' is indeed a singlet or actually a doublet/multiplet. DoubletFinder, for instance, predicts doublets by first constructing artificial doublets by randomly averaging cells in the data, and then for each cell testing whether it is more similar to the artificially doublets or not. This helps with the decision whether a cell is likely a doublet or not. Similarly, mitochondrial transcript percentage may not be sufficient to filter out stressed or unhealthy cells. Sometimes one would needs to do extra filtering, e.g. based on the machine learning based prediction.
+
+
+
+# Normalization and Data scaling
+
+
+## Normalization
+
+Similar to bulk RNA-seq, the amount of captured RNA is different from cell to cell, and one should therefore not directly compare the number of captured transcripts for each gene between cells. A normalization step, aiming to make gene expression levels between different cells comparable, is therefore necessary. The most commonly used normalization in scRNA-seq data analysis is very similar to the concept of TPM (Transcripts Per Million reads) - one normalizes the feature expression measurements for each cell to the total expression, and then multiplies this by a scale factor (10000 by default). At the end, the resulting expression levels are log-transformed so that the expression values better fit a normal distribution. It is worth to mention that before doing the log-transformation, one pseudocount is added to every value so that genes with zero transcripts detected in a cell still present values of zero after log-transform.
 
 ```{r}
 objectSeurat <- NormalizeData(
   objectSeurat, 
   normalization.method = "LogNormalize"
 )
+```
 
+
+## Feature selection
+
+The biggest advantage of single-cell as compared to bulk RNA-seq is the potential to look into cellular heterogeneity of samples, by looking for cell groups with distinct molecular signatures. However, not every gene has the same level of information and the same contribution when trying to identify different cell groups. For instance, genes with low expression levels, and those with similar expression levels across all cells, are not very informative and may dilute differences between distinct cell groups. Therefore, it is necessary to perform a proper feature selection before further exploring the scRNA-seq data.
+
+In Seurat, or more general in scRNA-seq data analysis, this step usually refers to the identification of highly variable features/genes, which are genes with the most varied expression levels across cells.
+
+```{r}
 objectSeurat <- FindVariableFeatures(
   objectSeurat, 
   selection.method = "vst", 
@@ -112,6 +157,11 @@ objectSeurat <- FindVariableFeatures(
 #https://rdrr.io/bioc/DESeq2/man/varianceStabilizingTransformation.html
 ```
 
+VST function calculates a variance stabilizing transformation (VST) from the fitted dispersion-mean relation(s) and then transforms the count data (normalized by division by the size factors or normalization factors), yielding a matrix of values which are now approximately homoskedastic (having constant variance along the range of mean values). The transformation also normalizes with respect to library size. The rlog is less sensitive to size factors, which can be an issue when size factors vary widely. These transformations are useful when checking for outliers or as input for machine learning techniques such as clustering or linear discriminant analysis.
+
+By default, Seurat calculates the standardized variance of each gene across cells, and picks the top 2000 ones as the highly variable features. One can change the number of highly variable features easily by giving the nfeatures option (here the top 3000 genes are used).
+
+There is no good criteria to determine how many highly variable features to use. Sometimes one needs to go through some iterations to pick the number that gives the most clear and interpretable result. Most often, a value between 2000 to 5000 is OK and using a different value doesn't affect the results too much.
 
 ```{r}
 # Identify the 10 most highly variable genes
@@ -119,7 +169,6 @@ top10 <- head(VariableFeatures(objectSeurat), 10)
 
 top10
 ```
-
 
 ```{r}
 # plot variable features with and without labels
@@ -133,11 +182,24 @@ plot2
 ```
 
 
+## Data Scaling
+
+Since different genes have different base expression levels and distributions, the contribution of each gene to the analysis is different if no data transformation is performed. This is something we do not want as we don't want our analysis to only depend on genes that are highly expressed. Therefore a scaling is applied to the data using the selected features, just like one usually does in any data science field.
+
 ```{r}
 all.genes <- rownames(objectSeurat)
 objectSeurat <- ScaleData(objectSeurat, features = all.genes)
 ```
 
+
+
+# Data Clustering (PCA/UMAP)
+
+In principle one can start to look at cell heterogeneity after identifying highly variable genes and scaling the data. However, applying a linear dimension reduction before doing any further analysis is strongly recommended and sometimes even seen as compulsory. The benefit of doing such a dimension reduction includes but is not limited to:
+
+1.  The data becomes much more compact so that computation becomes much faster.
+
+2.  As scRNA-seq data is intrinsically sparse, summarizing measurements of related features greatly enhances the signal robustness.
 
 ```{r}
 objectSeurat <- RunPCA(
@@ -149,7 +211,6 @@ objectSeurat <- RunPCA(
 print(objectSeurat[["pca"]], dims = 1:2, nfeatures = 5)
 ```
 
-
 ```{r}
 VizDimLoadings(
   objectSeurat, dims = 1:2, 
@@ -158,15 +219,15 @@ VizDimLoadings(
 )
 ```
 
-
 ```{r}
 DimPlot(objectSeurat, reduction = "pca")
 
 DimHeatmap(objectSeurat, dims = 1, cells = 500, balanced = TRUE)
 ```
+
 https://www.rdocumentation.org/packages/jackstraw/versions/1.3/topics/jackstraw
 
-Test for association between the observed data and their systematic patterns of variations. Systematic patterns may be captured by latent variables using principal component analysis (PCA), factor analysis (FA), and related methods. The jackstraw enables statistical testing for association between observed variables and latent variables, as captured by PCs or other estimates. 
+Test for association between the observed data and their systematic patterns of variations. Systematic patterns may be captured by latent variables using principal component analysis (PCA), factor analysis (FA), and related methods. The jackstraw enables statistical testing for association between observed variables and latent variables, as captured by PCs or other estimates.
 
 ```{r}
 # NOTE: This process can take a long time for big datasets, comment out for expediency. More
@@ -179,16 +240,11 @@ objectSeurat <- ScoreJackStraw(objectSeurat, dims = 1:20)
 JackStrawPlot(objectSeurat, dims = 1:15)
 ```
 
-
 ```{r}
 ElbowPlot(objectSeurat)
 ```
 
-We chose 10 here, but encourage users to consider the following:
-
-Dendritic cell and NK aficionados may recognize that genes strongly associated with PCs 12 and 13 define rare immune subsets (i.e. MZB1 is a marker for plasmacytoid DCs). However, these groups are so rare, they are difficult to distinguish from background noise for a dataset of this size without prior knowledge
-.
-We encourage users to repeat downstream analyses with a different number of PCs (10, 15, or even 50!). As you will observe, the results often do not differ dramatically.
+We chose 10 here, but encourage users to repeat downstream analyses with a different number of PCs (10, 15, or even 50!). As you will observe, the results often do not differ dramatically.
 
 We advise users to err on the higher side when choosing this parameter. For example, performing downstream analyses with only 5 PCs does significantly and adversely affect results.
 
@@ -197,12 +253,14 @@ objectSeurat <- FindNeighbors(objectSeurat, dims = 1:10)
 objectSeurat <- FindClusters(objectSeurat, resolution = 0.5)
 ```
 
-
 ```{r}
 # Look at cluster IDs of the first 5 cells
 head(Idents(objectSeurat), 5)
 ```
 
+A linear dimension reduction has both pros and cons. The good side is that every PC is a linear combination of gene expression so interpretation of PCs are straightforward. Also the data is compressed but not disorted, therefore information in the data is largely remained. The bad side, on the other hand, is that one usually needs more than 10 PCs to cover most of the information. This is fine for most of the analysis, but not for visualization where it is impossible to go over three dimensions for ordinary persons.
+
+The most commonly used non-linear dimension reduction methods in scRNA-seq data analysis are t-distributed Stochastic Neighbor Embedding (t-SNE) and Uniform Manifold Approximation and Projection (UMAP). In this example analysis I only use `umap`.
 
 ```{r}
 objectSeurat <- RunUMAP(objectSeurat, dims = 1:10)
@@ -211,6 +269,8 @@ DimPlot(objectSeurat, reduction = "umap")
 ```
 
 
+
+# Markers Identification  
 
 ```{r}
 # find all markers of cluster 1
@@ -231,7 +291,6 @@ VlnPlot(
 )
 ```
 
-
 ```{r}
 # find all markers of cluster 2
 cluster2.markers <- FindMarkers(
@@ -250,9 +309,6 @@ VlnPlot(
   )
 )
 ```
-
-
-
 
 ```{r}
 # find all markers distinguishing cluster 5 from clusters 0 and 3
@@ -273,7 +329,6 @@ VlnPlot(
 )
 ```
 
-
 ```{r}
 # find markers for every cluster compared to all remaining cells, report only the positive ones
 objectSeurat.markers <- FindAllMarkers(
@@ -283,7 +338,6 @@ objectSeurat.markers <- FindAllMarkers(
   logfc.threshold = 0.25
 )
 ```
-
 
 ```{r}
 x <- objectSeurat.markers %>% 
@@ -295,30 +349,26 @@ FeaturePlot(objectSeurat, features = x$gene[1:4])
 FeaturePlot(objectSeurat, features = x$gene[5:8])
 ```
 
-
-
-
 ```{r}
-# p <- FeaturePlot(
-#   objectSeurat,
-#   features = c(
-#     "MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ",
-#     "PPBP", "CD8A"
-#   ), 
-#   combine = FALSE
-# )
-# 
-# p <- lapply(X = p, FUN = function(x) x + 
-#                                         theme(plot.title = element_text(size = 8)) +
-#                                         theme(axis.title.y = element_text(size = 5)) +
-#                                         theme(axis.title.x = element_text(size = 5)) +
-#                                         theme(axis.text.y = element_text(size = 5)) +
-#                                         theme(axis.text.x = element_text(size = 5)) +
-#                                         theme(legend.position = "none")  )
-# 
-# CombinePlots(plots = p)
-```
+p <- FeaturePlot(
+  objectSeurat,
+  features = c(
+    "MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ",
+    "PPBP", "CD8A"
+  ),
+  combine = FALSE
+)
 
+p <- lapply(X = p, FUN = function(x) x +
+              theme(plot.title = element_text(size = 8)) +
+              theme(axis.title.y = element_text(size = 5)) +
+              theme(axis.title.x = element_text(size = 5)) +
+              theme(axis.text.y = element_text(size = 5)) +
+              theme(axis.text.x = element_text(size = 5)) +
+              theme(legend.position = "none")  )
+
+CombinePlots(plots = p)
+```
 
 ```{r}
 top10 <- objectSeurat.markers %>% 
@@ -327,7 +377,6 @@ top10 <- objectSeurat.markers %>%
 
 top10
 ```
-
 
 ```{r}
 p2 <- DoHeatmap(
@@ -339,47 +388,42 @@ p2 <- DoHeatmap(
 ) 
 
 p2 <- lapply(X = p2, FUN = function(x) x + 
-                                        theme(plot.title = element_text(size = 8)) +
-                                        theme(axis.title.y = element_text(size = 5)) +
-                                        theme(axis.title.x = element_text(size = 5)) +
-                                        theme(axis.text.y = element_text(size = 3)) +
-                                        theme(legend.position = "none")  )
+               theme(plot.title = element_text(size = 8)) +
+               theme(axis.title.y = element_text(size = 5)) +
+               theme(axis.title.x = element_text(size = 5)) +
+               theme(axis.text.y = element_text(size = 3)) +
+               theme(legend.position = "none")  )
 
 CombinePlots(plots = p2)
 
 ```
 
+<!-- # Assigning cell type identity to clusters -->
 
+<!-- ```{r} -->
+<!-- new.cluster.ids <- c( -->
+<!--   "Naive CD4 T", "Memory CD4 T", "CD14+ Mono", "B", "CD8 T", -->
+<!--   "FCGR3A+ Mono", "NK", "DC", "Platelet" -->
+<!-- ) -->
 
-# Assigning cell type identity to clusters
+<!-- names(new.cluster.ids) <- levels(objectSeurat) -->
 
-```{r}
-# new.cluster.ids <- c(
-#   "Naive CD4 T", "Memory CD4 T", "CD14+ Mono", "B", "CD8 T", 
-#   "FCGR3A+ Mono", "NK", "DC", "Platelet"
-# )
-# 
-# names(new.cluster.ids) <- levels(objectSeurat)
-# 
-# objectSeurat <- RenameIdents(objectSeurat, new.cluster.ids)
-# 
-# DimPlot(objectSeurat, reduction = "pca", label = TRUE, pt.size = 0.5)
-```
+<!-- objectSeurat <- RenameIdents(objectSeurat, new.cluster.ids) -->
 
-```{r}
-objectSeurat
+<!-- DimPlot(objectSeurat, reduction = "pca", label = TRUE, pt.size = 0.5) -->
+<!-- ``` -->
 
-DimPlot(
-  objectSeurat, 
-  reduction = "umap", 
-  label = TRUE,
-  pt.size = 0.5
-)
-```
+<!-- ```{r} -->
+<!-- objectSeurat -->
 
+<!-- DimPlot( -->
+<!--   objectSeurat,  -->
+<!--   reduction = "umap",  -->
+<!--   label = TRUE, -->
+<!--   pt.size = 0.5 -->
+<!-- ) -->
+<!-- ``` -->
 
 ```{r}
 sessionInfo()
 ```
-
-
