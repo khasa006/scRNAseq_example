@@ -1,6 +1,6 @@
 # scRNAseq_example
 
-In this example analysis, I teird to use to use Seurat to analyze your scRNA-seq data in R.
+In this example analysis, I tried to use to use Seurat to analyze your scRNA-seq data in R.
 
 Orginal guide of this analysis can be found:
 
