@@ -37,7 +37,10 @@ options(dplyr.summarise.inform=F)
 
 ```
 
-This is an example analysis using Seurat package to analyze scRNA-seq data in R. Seurat is a popular package for single-cell RNA sequencing data analysis that provides a wide range of functions for preprocessing, normalization, quality control, clustering, and visualization of scRNA-seq data.
+This is an example analysis using Seurat package to analyze scRNA-seq data in R.
+Seurat is a popular package for single-cell RNA sequencing data analysis that 
+provides a wide range of functions for preprocessing, normalization, quality 
+control, clustering, and visualization of scRNA-seq data.
 
 
 
@@ -54,9 +57,11 @@ objectSeurat <- readRDS(
 
 # Data QC and Inspection
 
-After importing (or creating) the Seurat object, the next step is to do quality control on the data. The most common quality control is to filter out
+After importing (or creating) the Seurat object, the next step is to do quality 
+control on the data. The most common quality control is to filter out
 
-1.  Cells with too few genes detected. They usually represent cells which are not sequenced deep enough for reliable characterization.
+1.  Cells with too few genes detected. They usually represent cells which are not
+sequenced deep enough for reliable characterization.
 
 2.  Cells with too many genes detected. They may represent doublets or multiplets (i.e. two or more cells in the same droplet, therefore sharing the same cell barcode).
 
