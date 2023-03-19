@@ -54,7 +54,7 @@ objectSeurat <- readRDS(
 
 # Data QC and Inspection
 
-After creating the Seurat object, the next step is to do quality control on the data. The most common quality control is to filter out
+After importing (or creating) the Seurat object, the next step is to do quality control on the data. The most common quality control is to filter out
 
 1.  Cells with too few genes detected. They usually represent cells which are not sequenced deep enough for reliable characterization.
 
