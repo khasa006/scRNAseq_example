@@ -20,12 +20,13 @@ bibliography: [references.bib, packages.bib]
 csl: the-new-england-journal-of-medicine.csl
 ---
 
-
 ```{r}
 #| label: tidyverse
 #| echo: false
 
 library(conflicted)
+library(Seurat)
+library(patchwork)
 conflict_prefer("filter", "dplyr", quiet = TRUE)
 conflict_prefer("lag", "dplyr", quiet = TRUE)
 
@@ -36,28 +37,349 @@ options(dplyr.summarise.inform=F)
 
 ```
 
-# Introduction
 
-# Methods
+Original Guide: https://satijalab.org/seurat/articles/objectSeurat3k_tutorial.html
 
-Analyses were conducted with `r stringr::word(R.Version()$version.string, 1, 3)` with the `tidyverse` (`r packageVersion("tidyverse")`), `rUM` (`r packageVersion("rUM")`), `table1` (`r packageVersion("table1")`) packages used to preprocess and summarize data.[@R-base; @R-tidyverse; @tidyverse2019; @R-rUM; @R-table1] 
 
-# Results
+# Chapters  
+1. Package Import 
+2. Data Import  
+3. Data QC and Inspection  
+5. Data Normalization  
+6. Data Clustering (PCA/UMAP)  
+7. Markers Identification  
+8. Putting all together  
 
-# Conclusion
 
-# References {-}
+
+# Download the rawdata here
+https://s3-us-west-2.amazonaws.com/10x.files/samples/cell/objectSeurat3k/objectSeurat3k_filtered_gene_bc_matrices
 
 ```{r}
-#| include: false
-
-# automatically create a bib database for loaded R packages & rUM
-knitr::write_bib(
-  c(
-    .packages(),
-    "rUM",
-    "table1"
-  ),
-  "packages.bib"
+# Load the Seurat dbject dataset
+objectSeurat <- readRDS(
+  "./data/AD00201.rds"
 )
 ```
+
+
+```{r}
+# The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+objectSeurat[["percent.mt"]] <- PercentageFeatureSet(
+  objectSeurat, pattern = "^MT-"
+)
+
+# Visualize QC metrics as a violin plot
+VlnPlot(
+  objectSeurat, 
+  features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), 
+  ncol = 3
+)
+```
+
+
+```{r}
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+
+plot1 <- FeatureScatter(
+  objectSeurat, 
+  feature1 = "nCount_RNA", 
+  feature2 = "percent.mt"
+)
+
+plot2 <- FeatureScatter(
+  objectSeurat, 
+  feature1 = "nCount_RNA", 
+  feature2 = "nFeature_RNA"
+)
+
+plot1 + plot2
+```
+VST function calculates a variance stabilizing transformation (VST) from the fitted dispersion-mean relation(s) and then transforms the count data (normalized by division by the size factors or normalization factors), yielding a matrix of values which are now approximately homoskedastic (having constant variance along the range of mean values). The transformation also normalizes with respect to library size. The rlog is less sensitive to size factors, which can be an issue when size factors vary widely. These transformations are useful when checking for outliers or as input for machine learning techniques such as clustering or linear discriminant analysis.
+
+```{r}
+objectSeurat <- NormalizeData(
+  objectSeurat, 
+  normalization.method = "LogNormalize"
+)
+
+objectSeurat <- FindVariableFeatures(
+  objectSeurat, 
+  selection.method = "vst", 
+  nfeatures = 2000
+)
+#https://rdrr.io/bioc/DESeq2/man/varianceStabilizingTransformation.html
+```
+
+
+```{r}
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(objectSeurat), 10)
+
+top10
+```
+
+
+```{r}
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(objectSeurat)
+
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+
+plot1
+
+plot2
+```
+
+
+```{r}
+all.genes <- rownames(objectSeurat)
+objectSeurat <- ScaleData(objectSeurat, features = all.genes)
+```
+
+
+```{r}
+objectSeurat <- RunPCA(
+  objectSeurat, 
+  features = VariableFeatures(object = objectSeurat)
+)
+
+# Examine and visualize PCA results a few different ways
+print(objectSeurat[["pca"]], dims = 1:2, nfeatures = 5)
+```
+
+
+```{r}
+VizDimLoadings(
+  objectSeurat, dims = 1:2, 
+  nfeatures = 15, 
+  reduction = "pca"
+)
+```
+
+
+```{r}
+DimPlot(objectSeurat, reduction = "pca")
+
+DimHeatmap(objectSeurat, dims = 1, cells = 500, balanced = TRUE)
+```
+https://www.rdocumentation.org/packages/jackstraw/versions/1.3/topics/jackstraw
+
+Test for association between the observed data and their systematic patterns of variations. Systematic patterns may be captured by latent variables using principal component analysis (PCA), factor analysis (FA), and related methods. The jackstraw enables statistical testing for association between observed variables and latent variables, as captured by PCs or other estimates. 
+
+```{r}
+# NOTE: This process can take a long time for big datasets, comment out for expediency. More
+# approximate techniques such as those implemented in ElbowPlot() can be used to reduce
+# computation time
+objectSeurat <- JackStraw(objectSeurat, num.replicate = 100)
+
+objectSeurat <- ScoreJackStraw(objectSeurat, dims = 1:20)
+
+JackStrawPlot(objectSeurat, dims = 1:15)
+```
+
+
+```{r}
+ElbowPlot(objectSeurat)
+```
+
+We chose 10 here, but encourage users to consider the following:
+
+Dendritic cell and NK aficionados may recognize that genes strongly associated with PCs 12 and 13 define rare immune subsets (i.e. MZB1 is a marker for plasmacytoid DCs). However, these groups are so rare, they are difficult to distinguish from background noise for a dataset of this size without prior knowledge
+.
+We encourage users to repeat downstream analyses with a different number of PCs (10, 15, or even 50!). As you will observe, the results often do not differ dramatically.
+
+We advise users to err on the higher side when choosing this parameter. For example, performing downstream analyses with only 5 PCs does significantly and adversely affect results.
+
+```{r}
+objectSeurat <- FindNeighbors(objectSeurat, dims = 1:10)
+objectSeurat <- FindClusters(objectSeurat, resolution = 0.5)
+```
+
+
+```{r}
+# Look at cluster IDs of the first 5 cells
+head(Idents(objectSeurat), 5)
+```
+
+
+```{r}
+objectSeurat <- RunUMAP(objectSeurat, dims = 1:10)
+
+DimPlot(objectSeurat, reduction = "umap")
+```
+
+
+
+```{r}
+# find all markers of cluster 1
+cluster1.markers <- FindMarkers(
+  objectSeurat, 
+  ident.1 = 1, 
+  min.pct = 0.25
+)
+
+head(cluster1.markers, n = 5)
+
+VlnPlot(
+  objectSeurat, 
+  features = c(
+    row.names(cluster1.markers)[1],
+    row.names(cluster1.markers)[2]
+  )
+)
+```
+
+
+```{r}
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(
+  objectSeurat, 
+  ident.1 = 2,
+  min.pct = 0.25
+)
+
+head(cluster2.markers, n = 5)
+
+VlnPlot(
+  objectSeurat, 
+  features = c(
+    row.names(cluster2.markers)[1], 
+    row.names(cluster2.markers)[2]
+  )
+)
+```
+
+
+
+
+```{r}
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster5.markers <- FindMarkers(
+  objectSeurat, 
+  ident.1 = 5, ident.2 = c(0, 3), 
+  min.pct = 0.25
+)
+
+head(cluster5.markers, n = 5)
+
+VlnPlot(
+  objectSeurat, 
+  features = c(
+    row.names(cluster5.markers)[1], 
+    row.names(cluster5.markers)[2]
+  )
+)
+```
+
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+objectSeurat.markers <- FindAllMarkers(
+  objectSeurat,
+  only.pos = TRUE, 
+  min.pct = 0.25, 
+  logfc.threshold = 0.25
+)
+```
+
+
+```{r}
+x <- objectSeurat.markers %>% 
+  group_by(cluster) %>%
+  top_n(n = 1, wt = avg_log2FC)
+
+FeaturePlot(objectSeurat, features = x$gene[1:4])
+
+FeaturePlot(objectSeurat, features = x$gene[5:8])
+```
+
+
+
+
+```{r}
+# p <- FeaturePlot(
+#   objectSeurat,
+#   features = c(
+#     "MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ",
+#     "PPBP", "CD8A"
+#   ), 
+#   combine = FALSE
+# )
+# 
+# p <- lapply(X = p, FUN = function(x) x + 
+#                                         theme(plot.title = element_text(size = 8)) +
+#                                         theme(axis.title.y = element_text(size = 5)) +
+#                                         theme(axis.title.x = element_text(size = 5)) +
+#                                         theme(axis.text.y = element_text(size = 5)) +
+#                                         theme(axis.text.x = element_text(size = 5)) +
+#                                         theme(legend.position = "none")  )
+# 
+# CombinePlots(plots = p)
+```
+
+
+```{r}
+top10 <- objectSeurat.markers %>% 
+            group_by(cluster) %>% 
+            top_n(n = 10, wt = avg_log2FC)
+
+top10
+```
+
+
+```{r}
+p2 <- DoHeatmap(
+  objectSeurat,
+  features = top10$gene, 
+  group.bar.height = 0.01,
+  size = 3,
+  combine = FALSE
+) 
+
+p2 <- lapply(X = p2, FUN = function(x) x + 
+                                        theme(plot.title = element_text(size = 8)) +
+                                        theme(axis.title.y = element_text(size = 5)) +
+                                        theme(axis.title.x = element_text(size = 5)) +
+                                        theme(axis.text.y = element_text(size = 3)) +
+                                        theme(legend.position = "none")  )
+
+CombinePlots(plots = p2)
+
+```
+
+
+
+# Assigning cell type identity to clusters
+
+```{r}
+# new.cluster.ids <- c(
+#   "Naive CD4 T", "Memory CD4 T", "CD14+ Mono", "B", "CD8 T", 
+#   "FCGR3A+ Mono", "NK", "DC", "Platelet"
+# )
+# 
+# names(new.cluster.ids) <- levels(objectSeurat)
+# 
+# objectSeurat <- RenameIdents(objectSeurat, new.cluster.ids)
+# 
+# DimPlot(objectSeurat, reduction = "pca", label = TRUE, pt.size = 0.5)
+```
+
+```{r}
+objectSeurat
+
+DimPlot(
+  objectSeurat, 
+  reduction = "umap", 
+  label = TRUE,
+  pt.size = 0.5
+)
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
