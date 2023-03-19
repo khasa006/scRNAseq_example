@@ -8,7 +8,7 @@ format:
 knitr:
   opts_chunk:      ########## set global options ############
     collapse: true # keep code from blocks together (if shown)
-    echo: true    # show code
+    echo: false    # show code
     message: true  # show messages
     warning: true  # show warnings
     error: true    # show error messages
