@@ -8,7 +8,7 @@ format:
 knitr:
   opts_chunk:      ########## set global options ############
     collapse: true # keep code from blocks together (if shown)
-    echo: false    # show code
+    echo: true   # show code
     message: true  # show messages
     warning: true  # show warnings
     error: true    # show error messages
@@ -36,6 +36,8 @@ suppressPackageStartupMessages(library(tidyverse))
 options(dplyr.summarise.inform=F)
 
 ```
+
+This is an example analysis using Seurat package to analyze scRNA-seq data in R. Seurat is a popular package for single-cell RNA sequencing data analysis that provides a wide range of functions for preprocessing, normalization, quality control, clustering, and visualization of scRNA-seq data.
 
 
 
