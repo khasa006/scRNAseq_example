@@ -8,7 +8,7 @@ format:
 knitr:
   opts_chunk:      ########## set global options ############
     collapse: true # keep code from blocks together (if shown)
-    echo: true   # show code
+    echo: true     # show code
     message: true  # show messages
     warning: true  # show warnings
     error: true    # show error messages
@@ -37,14 +37,9 @@ options(dplyr.summarise.inform=F)
 
 ```
 
-This is an example analysis using Seurat package to analyze scRNA-seq data in R.
-Seurat is a popular package for single-cell RNA sequencing data analysis that 
-provides a wide range of functions for preprocessing, normalization, quality 
-control, clustering, and visualization of scRNA-seq data.
+This is an example analysis using Seurat package to analyze scRNA-seq data in R. Seurat is a popular package for single-cell RNA sequencing data analysis that provides a wide range of functions for preprocessing, normalization, quality control, clustering, and visualization of scRNA-seq data.
 
-
-
-# Import Seurat Object 
+# Import Seurat Object
 
 ```{r}
 # Load the Seurat dbject dataset
@@ -53,30 +48,29 @@ objectSeurat <- readRDS(
 )
 ```
 
-
-
 # Data QC and Inspection
 
-After importing (or creating) the Seurat object, the next step is to do quality 
-control on the data. The most common quality control is to filter out
+To perform quality control on the data after importing (or creating) the Seurat object, follow these steps:
 
-1.  Cells with too few genes detected. They usually represent cells which are not
-sequenced deep enough for reliable characterization.
+1.  Check for cells with too few genes detected. These cells may not have been sequenced deeply enough for reliable characterization. Filter them out.
 
-2.  Cells with too many genes detected. They may represent doublets or multiplets (i.e. two or more cells in the same droplet, therefore sharing the same cell barcode).
+2.  Check for cells with too many genes detected. These cells may represent doublets or multiplets, where two or more cells are in the same droplet, and therefore share the same cell barcode. Filter them out.
 
-3.  Cells with high mitochondrial transcript percentage. As most of the scRNA-seq experiments use oligo-T to capture mRNAs, mitochondrial transcripts should be relatively under-representative due to their lack of poly-A tails, but it is unavoidable that some mitochondrial transcripts are captured. Meanwhile, there is also some evidence that stable poly-A tails exist in some mitochondrial transcripts but serve as a marker for degradation (e.g. this [paper](https://mcb.asm.org/content/25/15/6427.long)). Together, cells with high mitochondrial transcript percentage likely represent cells under stress (e.g. hypoxia) which produce a lot of mitochondria, or which produce an abnormally high amount of truncated mitochondrial transcripts.
+3.  Check for cells with a high mitochondrial transcript percentage. As scRNA-seq experiments use oligo-T to capture mRNAs, mitochondrial transcripts should be relatively under-representative due to their lack of poly-A tails. However, some mitochondrial transcripts may be captured. Cells with high mitochondrial transcript percentages likely represent cells under stress (e.g., hypoxia) that produce a lot of mitochondria or an abnormally high amount of truncated mitochondrial transcripts. Filter them out.
 
-While numbers of detected genes are summarized by Seurat automatically when creating the Seurat object (with nFeature_RNA being the number of detected genes/features; nCount_RNA being the number of detected transcripts), one needs to calculate mitochondial transcript percentages manually. Still, Seurat provides an easy solution
+Note that Seurat automatically summarizes the numbers of detected genes when creating the Seurat object (nFeature_RNA) and the number of detected transcripts (nCount_RNA). However, you need to calculate mitochondrial transcript percentages manually. Seurat provides an easy solution.
 
 ```{r}
-# The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+# The [[ operator can add columns to object metadata. 
+# This is a great place to stash QC stats
 objectSeurat[["percent.mt"]] <- PercentageFeatureSet(
   objectSeurat, pattern = "^MT-"
 )
 ```
 
-Please note that there is no one-size-fits-all filtering criteria, as the normal ranges of these metrics can vary dramatically from one experiment to another, depending on sample origin as well as reagents and sequencing depths. One suggestion here is to ONLY FILTER OUT OUTLIER CELLS, i.e. the minority of cells with certain QC metrics clearly above or below the majority of cells. To do that, one needs to first know how these values are distributed in the data. One can look at the distribution by creating a violin plot for each of the metrics.
+When filtering cells based on quality control (QC) metrics, it is important to note that there is no one-size-fits-all filtering criteria. The normal ranges of these metrics can vary dramatically from one experiment to another, depending on sample origin, reagents, and sequencing depths. One suggestion to address this variability is to only filter out outlier cells, which are the minority of cells with certain QC metrics clearly above or below the majority of cells.
+
+To identify these outlier cells, we first need to know how the QC metric values are distributed in the data. We can visualize this distribution using a violin plot for each of the metrics. The violin plot displays the distribution of values for each metric, with the width of the plot showing the density of cells at each value. By creating these plots, we can identify cells that fall far outside the main distribution of values for each metric, indicating that they are likely outliers. These outlier cells can then be filtered out, while retaining the remaining cells for downstream analyses.
 
 ```{r}
 # Visualize QC metrics as a violin plot
@@ -98,11 +92,12 @@ VlnPlot(
 )
 ```
 
-And as one would expect, number of detected genes and number of detected transcripts are well correlated across cells while mitochondrial transcript percentage is not.
+Based on our prior knowledge of these metrics, we would expect the number of detected genes and number of detected transcripts to be well correlated, while mitochondrial transcript percentage is not expected to be strongly correlated with the other two metrics.
 
 ```{r}
-# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
-# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+# FeatureScatter is typically used to visualize feature-feature relationships,
+# but can be used for anything calculated by the object, i.e. columns in object
+# metadata, PC scores etc.
 
 plot1 <- FeatureScatter(
   objectSeurat, 
@@ -119,9 +114,9 @@ plot2 <- FeatureScatter(
 plot1 + plot2
 ```
 
-P.S. patchwork is an R package developed to facilitate layout of plots produced by ggplot2 (Seurat uses ggplot2 to produce plots if you use the plotting functions in the Seurat package). Without patchwork, it is illegal to run `plot1 + plot2`.
+The R package patchwork was created to simplify the organization of plots generated by ggplot2, which Seurat relies on for its own plotting functions. Without patchwork, attempting to execute plot1 + plot2 would be invalid.
 
-Due to the correlation of gene number and transcript number, we only need to set a cutoff to either one of these metrics, combined with an upper threshold of mitochondrial transcript percentage, for the QC. For instance, for this data set, a detected gene number between 500 and 5000, and a mitochondrial transcript percentage lower than 5% would be quite reasonable, but it is fine to use different thresholds.
+To perform quality control (QC) on our data, we only need to establish a cutoff for one of two metrics: gene count or transcript count. Additionally, we should set an upper threshold for the percentage of mitochondrial transcripts. For this dataset, appropriate parameters could be a gene count between 500 and 5000, and a mitochondrial transcript percentage below 5%, though other thresholds may also be effective.
 
 ```{r}
 objectSeurat <- subset(
@@ -130,16 +125,13 @@ objectSeurat <- subset(
 )
 ```
 
-It is worth to mention that sometimes more QC may need to be applied. One potential issue is the presence of doublets. As the amount of captured RNA varies a lot from cell to cell, doublets don't always show a higher number of detected genes or transcripts. There are several tools available now, which are designed to predict whether a 'cell' is indeed a singlet or actually a doublet/multiplet. DoubletFinder, for instance, predicts doublets by first constructing artificial doublets by randomly averaging cells in the data, and then for each cell testing whether it is more similar to the artificially doublets or not. This helps with the decision whether a cell is likely a doublet or not. Similarly, mitochondrial transcript percentage may not be sufficient to filter out stressed or unhealthy cells. Sometimes one would needs to do extra filtering, e.g. based on the machine learning based prediction.
-
-
+It is important to note that in some cases, additional QC measures may be necessary. One possible concern is the occurrence of doublets, which may not exhibit a higher count of detected genes or transcripts due to variations in captured RNA across cells. To address this, several tools have been developed to identify potential doublets or multiplets. For example, Doublet Finder creates artificial doublets by averaging cells at random and compares each cell to these artificial doublets to determine whether it is more similar to them or not. This approach can help determine whether a cell is likely a doublet. Furthermore, filtering based on mitochondrial transcript percentage alone may not suffice to eliminate unhealthy or stressed cells. In such cases, additional filtering techniques, such as those utilizing machine learning-based predictions, may be necessary.
 
 # Normalization and Data scaling
 
-
 ## Normalization
 
-Similar to bulk RNA-seq, the amount of captured RNA is different from cell to cell, and one should therefore not directly compare the number of captured transcripts for each gene between cells. A normalization step, aiming to make gene expression levels between different cells comparable, is therefore necessary. The most commonly used normalization in scRNA-seq data analysis is very similar to the concept of TPM (Transcripts Per Million reads) - one normalizes the feature expression measurements for each cell to the total expression, and then multiplies this by a scale factor (10000 by default). At the end, the resulting expression levels are log-transformed so that the expression values better fit a normal distribution. It is worth to mention that before doing the log-transformation, one pseudocount is added to every value so that genes with zero transcripts detected in a cell still present values of zero after log-transform.
+Similar to bulk RNA-seq, the amount of RNA captured can vary from cell to cell, which means that comparing the number of captured transcripts for each gene directly between cells is not appropriate. To enable the comparison of gene expression levels across different cells, a normalization step is necessary. The most commonly used normalization method in scRNA-seq data analysis is quite similar to TPM (Transcripts Per Million reads). It involves normalizing the feature expression measurements for each cell to the total expression and then multiplying this by a scale factor (typically 10000). Finally, the resulting expression levels are log-transformed to better fit a normal distribution. Notably, before log-transforming the data, a pseudocount is added to each value to ensure that genes with zero transcripts detected in a cell still have values of zero after log-transformation.
 
 ```{r}
 objectSeurat <- NormalizeData(
@@ -148,12 +140,11 @@ objectSeurat <- NormalizeData(
 )
 ```
 
-
 ## Feature selection
 
-The biggest advantage of single-cell as compared to bulk RNA-seq is the potential to look into cellular heterogeneity of samples, by looking for cell groups with distinct molecular signatures. However, not every gene has the same level of information and the same contribution when trying to identify different cell groups. For instance, genes with low expression levels, and those with similar expression levels across all cells, are not very informative and may dilute differences between distinct cell groups. Therefore, it is necessary to perform a proper feature selection before further exploring the scRNA-seq data.
+Single-cell RNA sequencing (scRNA-seq) has a significant advantage over bulk RNA-seq as it allows for the identification of cellular heterogeneity by looking for cell groups with distinct molecular signatures. However, not all genes are equally informative or contribute equally to the identification of different cell groups. Genes with low expression levels or those with similar expression levels across all cells may not provide much information and can dilute differences between distinct cell groups. Therefore, before exploring scRNA-seq data further, it is essential to perform a proper feature selection process.
 
-In Seurat, or more general in scRNA-seq data analysis, this step usually refers to the identification of highly variable features/genes, which are genes with the most varied expression levels across cells.
+In Seurat and other scRNA-seq data analysis methods, this process involves the identification of highly variable features or genes. These are genes with the most varied expression levels across cells and are used to distinguish different cell groups with distinct molecular signatures.
 
 ```{r}
 objectSeurat <- FindVariableFeatures(
@@ -164,11 +155,11 @@ objectSeurat <- FindVariableFeatures(
 #https://rdrr.io/bioc/DESeq2/man/varianceStabilizingTransformation.html
 ```
 
-VST function calculates a variance stabilizing transformation (VST) from the fitted dispersion-mean relation(s) and then transforms the count data (normalized by division by the size factors or normalization factors), yielding a matrix of values which are now approximately homoskedastic (having constant variance along the range of mean values). The transformation also normalizes with respect to library size. The rlog is less sensitive to size factors, which can be an issue when size factors vary widely. These transformations are useful when checking for outliers or as input for machine learning techniques such as clustering or linear discriminant analysis.
+The VST function is used to transform the count data in scRNA-seq data analysis. This transformation aims to make the data approximately homoskedastic, meaning that the variance is constant across the range of mean values. It also normalizes the data with respect to library size. However, the transformation can be sensitive to size factors, which can vary widely. To address this issue, Seurat provides another transformation called rlog, which is less sensitive to size factors. Both transformations can be useful when checking for outliers or when using machine learning techniques such as clustering or linear discriminant analysis.
 
-By default, Seurat calculates the standardized variance of each gene across cells, and picks the top 2000 ones as the highly variable features. One can change the number of highly variable features easily by giving the nfeatures option (here the top 3000 genes are used).
+In Seurat, the VST function is used to identify highly variable features/genes by calculating the standardized variance of each gene across cells and picking the top ones as highly variable features. By default, the top 2000 highly variable features are selected, but this number can be changed using the nfeatures option.
 
-There is no good criteria to determine how many highly variable features to use. Sometimes one needs to go through some iterations to pick the number that gives the most clear and interpretable result. Most often, a value between 2000 to 5000 is OK and using a different value doesn't affect the results too much.
+There is no good criteria to determine how many highly variable features to use. The number of highly variable features to use is determined through iteration and observation of the results. Typically, a value between 2000 to 5000 is sufficient and using a different value does not significantly affect the results.
 
 ```{r}
 # Identify the 10 most highly variable genes
@@ -188,25 +179,26 @@ plot1
 plot2
 ```
 
-
 ## Data Scaling
 
-Since different genes have different base expression levels and distributions, the contribution of each gene to the analysis is different if no data transformation is performed. This is something we do not want as we don't want our analysis to only depend on genes that are highly expressed. Therefore a scaling is applied to the data using the selected features, just like one usually does in any data science field.
+When analyzing single-cell RNA-seq data, it is important to account for differences in gene expression levels and distributions. Without doing so, highly expressed genes would dominate the analysis, potentially obscuring important information from lower expressed genes. To prevent this, a scaling transformation is applied to the data using a set of selected features. This scaling allows for a fairer comparison between genes, ensuring that each gene's contribution to the analysis is given appropriate weight. Scaling is a common technique used across many different data science fields to ensure that all features are given equal consideration.
 
 ```{r}
 all.genes <- rownames(objectSeurat)
 objectSeurat <- ScaleData(objectSeurat, features = all.genes)
 ```
 
-
-
 # Data Clustering (PCA/UMAP)
 
-In principle one can start to look at cell heterogeneity after identifying highly variable genes and scaling the data. However, applying a linear dimension reduction before doing any further analysis is strongly recommended and sometimes even seen as compulsory. The benefit of doing such a dimension reduction includes but is not limited to:
+After identifying highly variable genes and scaling the scRNA-seq data, it is 
+strongly recommended to apply linear dimension reduction before conducting 
+further analysis. This step has several benefits, including but not limited to:
 
-1.  The data becomes much more compact so that computation becomes much faster.
+1.  Compressing the data and making it much more compact, which results in 
+faster computation times.
 
-2.  As scRNA-seq data is intrinsically sparse, summarizing measurements of related features greatly enhances the signal robustness.
+2.  Enhancing signal robustness by summarizing measurements of related features,
+which is especially important as scRNA-seq data is intrinsically sparse.
 
 ```{r}
 objectSeurat <- RunPCA(
@@ -232,9 +224,13 @@ DimPlot(objectSeurat, reduction = "pca")
 DimHeatmap(objectSeurat, dims = 1, cells = 500, balanced = TRUE)
 ```
 
-https://www.rdocumentation.org/packages/jackstraw/versions/1.3/topics/jackstraw
-
-Test for association between the observed data and their systematic patterns of variations. Systematic patterns may be captured by latent variables using principal component analysis (PCA), factor analysis (FA), and related methods. The jackstraw enables statistical testing for association between observed variables and latent variables, as captured by PCs or other estimates.
+When analyzing scRNA-seq data, it is important to identify the underlying 
+systematic patterns of variation, which can be captured by latent variables such
+as principal component analysis (PCA) or factor analysis (FA). However, it's not
+enough to simply identify these patterns - we also need to test for associations
+between observed variables and these latent variables. This is where the 
+jackstraw method comes in - it enables us to statistically test for such 
+associations, using PCs or other estimates as our latent variables.
 
 ```{r}
 # NOTE: This process can take a long time for big datasets, comment out for expediency. More
@@ -251,9 +247,13 @@ JackStrawPlot(objectSeurat, dims = 1:15)
 ElbowPlot(objectSeurat)
 ```
 
-We chose 10 here, but encourage users to repeat downstream analyses with a different number of PCs (10, 15, or even 50!). As you will observe, the results often do not differ dramatically.
-
-We advise users to err on the higher side when choosing this parameter. For example, performing downstream analyses with only 5 PCs does significantly and adversely affect results.
+In our analysis, we selected 10 principal components (PCs) to capture the 
+systematic variation in the data. However, we recommend users to test downstream
+analyses using different numbers of PCs, such as 10, 15, or 50, as we have 
+observed that the results do not differ significantly. It is important to note 
+that choosing a lower number of PCs, such as 5, can negatively impact the 
+downstream analysis results. Hence, we suggest erring on the higher side when 
+choosing the number of PCs to be used.
 
 ```{r}
 objectSeurat <- FindNeighbors(objectSeurat, dims = 1:10)
@@ -265,9 +265,20 @@ objectSeurat <- FindClusters(objectSeurat, resolution = 0.5)
 head(Idents(objectSeurat), 5)
 ```
 
-A linear dimension reduction has both pros and cons. The good side is that every PC is a linear combination of gene expression so interpretation of PCs are straightforward. Also the data is compressed but not disorted, therefore information in the data is largely remained. The bad side, on the other hand, is that one usually needs more than 10 PCs to cover most of the information. This is fine for most of the analysis, but not for visualization where it is impossible to go over three dimensions for ordinary persons.
+When performing linear dimension reduction, there are both advantages and 
+disadvantages to consider. One of the benefits is that each Principal Component
+(PC) is a linear combination of gene expressions, making the interpretation of 
+PCs straightforward. Additionally, the data is compressed without distorting it,
+thus preserving most of the information in the data. However, a potential 
+drawback is that more than 10 PCs are typically needed to capture most of the
+information. While this is generally acceptable for most analyses, it can be 
+problematic for visualization since ordinary people can only perceive up to three
+dimensions.
 
-The most commonly used non-linear dimension reduction methods in scRNA-seq data analysis are t-distributed Stochastic Neighbor Embedding (t-SNE) and Uniform Manifold Approximation and Projection (UMAP). In this example analysis I only use `umap`.
+Non-linear dimension reduction techniques such as t-distributed Stochastic 
+Neighbor Embedding (t-SNE) and Uniform Manifold Approximation and Projection 
+(UMAP) are commonly used in scRNA-seq data analysis to address this issue. In 
+this example analysis, only the umap method is used.
 
 ```{r}
 objectSeurat <- RunUMAP(objectSeurat, dims = 1:10)
@@ -275,9 +286,7 @@ objectSeurat <- RunUMAP(objectSeurat, dims = 1:10)
 DimPlot(objectSeurat, reduction = "umap")
 ```
 
-
-
-# Markers Identification  
+# Markers Identification
 
 ```{r}
 # find all markers of cluster 1
@@ -408,9 +417,13 @@ CombinePlots(plots = p2)
 <!-- # Assigning cell type identity to clusters -->
 
 <!-- ```{r} -->
+
 <!-- new.cluster.ids <- c( -->
+
 <!--   "Naive CD4 T", "Memory CD4 T", "CD14+ Mono", "B", "CD8 T", -->
+
 <!--   "FCGR3A+ Mono", "NK", "DC", "Platelet" -->
+
 <!-- ) -->
 
 <!-- names(new.cluster.ids) <- levels(objectSeurat) -->
@@ -418,17 +431,25 @@ CombinePlots(plots = p2)
 <!-- objectSeurat <- RenameIdents(objectSeurat, new.cluster.ids) -->
 
 <!-- DimPlot(objectSeurat, reduction = "pca", label = TRUE, pt.size = 0.5) -->
+
 <!-- ``` -->
 
 <!-- ```{r} -->
+
 <!-- objectSeurat -->
 
 <!-- DimPlot( -->
+
 <!--   objectSeurat,  -->
+
 <!--   reduction = "umap",  -->
+
 <!--   label = TRUE, -->
+
 <!--   pt.size = 0.5 -->
+
 <!-- ) -->
+
 <!-- ``` -->
 
 ```{r}
